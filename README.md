@@ -1,6 +1,6 @@
 # Virtualization in XV6
 
-This project is a part of the curse "Operating Systems" taught by Porf. Smruti Ranjan Sarangi.
+This project is a part of the curse "Operating Systems" (Spring-2019) taught by Prof. Smruti Ranjan Sarangi.
 The project requires to implement container related services in the UNIX-v6 based operating system XV6 to implement the following features:
 * Container manager
 * Virtual scheduler
@@ -10,6 +10,10 @@ The project requires to implement container related services in the UNIX-v6 base
 [Problem Statement](https://github.com/vinayak1998/xv6-public/blob/master/Project%20Details/Problem%20Statement.pdf)
 
 [Project Report](https://github.com/vinayak1998/xv6-public/blob/master/Project%20Details/Project%20Report.pdf)
+
+### High level design of the virtualization in XV6. Color coded arrows represent an operation, with number showing the order.:
+
+![diagram for high level design of virtualization in xv6](https://github.com/vinayak1998/xv6-public/blob/master/High%20level%20design.png)
 
 ## Container manager
 Container manager is a user program which mimics the functionalities provided by a container service (container manager.c). The basic functionalities provided are:
