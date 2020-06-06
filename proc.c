@@ -6,7 +6,100 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include <stddef.h>
+#include <stdio.h>
+#define MSGSIZE 1000
 
+//message datatypes
+struct IPC_send_message {
+  char IPC_mes[MSGSIZE];
+  int send_id;
+  int recv_id;
+};
+
+
+//global queues
+struct QNode
+{
+  struct IPC_send_message key;
+  struct QNode *next;
+};
+
+struct Queue
+{
+  struct QNode *front, *rear;
+};
+
+struct QNode* newNode(struct IPC_send_message k)
+{
+  struct QNode *temp = (struct QNode*)kalloc();
+  temp->key = k;
+  temp->next = NULL;
+  return temp;
+}
+
+// A utility function to create an empty queue
+struct Queue *createQueue()
+{
+    struct Queue *q = (struct Queue*)kalloc();
+    q->front = q->rear = NULL;
+    return q;
+}
+
+// The function to add a key k to q
+void enQueue(struct Queue *q, struct IPC_send_message k)
+{
+    // Create a new LL node
+    struct QNode *temp = newNode(k);
+
+    // If queue is empty, then new node is front and rear both
+    if (q->rear == NULL)
+    {
+       q->front = q->rear = temp;
+       return;
+    }
+
+    // Add the new node at the end of queue and change rear
+    q->rear->next = temp;
+    q->rear = temp;
+}
+
+// Function to remove a key from given queue q
+struct QNode *deQueue(struct Queue *q)
+{
+    // If queue is empty, return NULL.
+    if (q->front == NULL)
+       return NULL;
+
+    // Store previous front and move front one node ahead
+    struct QNode *temp = q->front;
+    q->front = q->front->next;
+
+    // If front becomes NULL, then change rear also as NULL
+    if (q->front == NULL)
+       q->rear = NULL;
+    return temp;
+}
+//------------------------------------------------------------------------------
+
+//Containers
+struct {
+  struct container cont[NCONT];
+}ctable;
+
+int num_containers = 0;
+
+void
+cstart(void)
+{
+  struct container *c;
+  for(c = ctable.cont; c< &ctable.cont[NCONT]; c++){
+    c->state = CUNUSED;
+    c->cid = -1;
+  }
+}
+
+//-------------------------------------------------------------
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -17,7 +110,7 @@ static struct proc *initproc;
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
-
+int scheduler_log = 0;
 static void wakeup1(void *chan);
 
 void
@@ -38,10 +131,10 @@ struct cpu*
 mycpu(void)
 {
   int apicid, i;
-  
+
   if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-  
+
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
@@ -88,6 +181,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->cid = 0;
 
   release(&ptable.lock);
 
@@ -124,7 +218,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-  
+
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -275,7 +369,7 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -325,7 +419,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -339,6 +433,10 @@ scheduler(void)
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
+      if(scheduler_log == 1){
+        cprintf("Container %d : Scheduling Process %d\n", p->cid, p->pid);
+      }
+      
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -418,7 +516,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+
   if(p == 0)
     panic("sleep");
 
@@ -500,6 +598,7 @@ kill(int pid)
 // Print a process listing to console.  For debugging.
 // Runs when user types ^P on console.
 // No lock to avoid wedging a stuck machine further.
+
 void
 procdump(void)
 {
@@ -531,4 +630,220 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+
+
+
+//printing ps
+void
+print_proc(void)
+{
+  acquire(&ptable.lock);
+  struct proc *p;
+  int cid = myproc()->cid;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state != UNUSED && p->cid == cid){
+      cprintf("pid:%d name:%s\n", p->pid, p->name);
+    }
+  }
+  release(&ptable.lock);
+}
+
+
+
+//array of queues
+struct Queue arr_q_IPC[NPROC];
+
+//functions for IPC
+
+int
+send(int sender_pid, int recv_pid, char* msg)
+{
+  struct IPC_send_message temp;
+  temp.send_id = sender_pid;
+  temp.recv_id = recv_pid;
+  for(int i = 0; i<MSGSIZE; i++){
+    (temp.IPC_mes)[i] = msg[i];
+  }
+  acquire(&ptable.lock);
+  enQueue(&arr_q_IPC[recv_pid], temp);
+  struct proc *p;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if (p->pid == recv_pid){
+      wakeup1(&p->chan);
+      break;
+    }
+  }
+  release(&ptable.lock);
+  return 0;
+}
+
+int
+recv(char* msg)
+{
+  struct proc *p_temp = myproc();
+  struct Queue temp_q = arr_q_IPC[p_temp->pid];
+  if (&temp_q == (struct  Queue*)NULL){
+    acquire(&ptable.lock);
+    sleep(p_temp, &ptable.lock);
+    release(&ptable.lock);
+  }
+  acquire(&ptable.lock);
+  struct QNode *temp = deQueue(&arr_q_IPC[p_temp->pid]);
+  for(int i = 0; i<MSGSIZE; i++){
+    msg[i] = ((temp->key).IPC_mes)[i];
+  }
+  release(&ptable.lock);
+  return 0;
+}
+
+
+//multicast
+
+int
+send_multi(int sender_pid, int recv_pid[], char* msg, int num_recv)
+{
+  for(int j=0; j<num_recv; j++){
+    struct IPC_send_message temp;
+    temp.send_id = sender_pid;
+    temp.recv_id = recv_pid[j];
+    for(int i = 0; i<MSGSIZE; i++){
+      (temp.IPC_mes)[i] = msg[i];
+    }
+    acquire(&ptable.lock);
+    enQueue(&arr_q_IPC[recv_pid[j]], temp);
+    struct proc *p;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if (p->pid == recv_pid[j]){
+        wakeup1(&p->chan);
+        break;
+      }
+    }
+    release(&ptable.lock);
+  }
+  return 0;
+}
+
+//definers
+void task(char* a){
+  return;
+}
+//containers
+
+int
+call_create_container(int cid)
+{
+  if(num_containers == 0){
+    cstart();
+  }
+  num_containers++;
+  struct inode *ip;
+  struct container *c;
+  task("Activating the containers");
+  for(c = ctable.cont; c < &ctable.cont[NCONT]; c++){
+    if(c->state == CUNUSED){
+      c->state = CUSED;
+      c->cid = cid;
+      c->num_procs = 0;
+      break;
+    }
+  }
+
+  char path[10];
+  path[0] = 'd';
+  path[1] = 'i';
+  path[2] = 'r';
+  path[3] = '\0';
+
+  cprintf("Directory: %s\n", path);
+  if ((ip = namei(path)) == 0) {
+    return -1;
+  }
+
+  c->rootdir = ip;
+  int i;
+  for(i = 0; i < NPROC; i++){
+    c->pids[i] = -1;
+  }
+  return 1;
+}
+
+int
+call_destroy_container(int cid)
+{
+  if(num_containers == 0){
+    return -1;
+  }
+  num_containers--;
+  struct container *c;
+  task("Searching the container from table");
+  for(c = ctable.cont; c < &ctable.cont[NCONT]; c++){
+    if(c->cid == cid){
+      c->state = CUNUSED;
+      c->cid = -1;
+    }
+  }
+  task("Killing all container processes");
+  if(c->num_procs > 0){
+    int i;
+    for(i = 0; i < NPROC; i++){
+      if(c->pids[i] != -1){
+        kill(c->pids[i]);
+      }
+    }
+    c->num_procs = 0;
+  }
+  return 1;
+}
+
+int
+call_join_container(int cid)
+{
+  struct proc *p;
+  p = myproc();
+  struct container *c;
+  task("Searching the container from table and setting it to process");
+  for(c = ctable.cont; c < &ctable.cont[NCONT]; c++){
+    if(c->cid == cid){
+      p->cid = cid;
+      c->num_procs =c->num_procs + 1;
+      break;
+    }
+  }
+  task("Adding process to container pid table");
+  int i;
+  for(i = 0; i<NPROC; i++){
+    if(c->pids[i] == -1){
+      c->pids[i] = p->pid;
+      break;
+    }
+  }
+  return cid;
+}
+
+int
+call_leave_container(void)
+{
+  struct proc *p;
+  struct container *c;
+  p = myproc();
+  int cid = p->cid;
+  int pid = p->pid;
+  p->cid = 0;
+  task("Searching the container from table");
+  for(c = ctable.cont; c < &ctable.cont[NCONT]; c++){
+    if(c->cid == cid){
+      break;
+    }
+  }
+  int i;
+  task("Removing process from the process table of container");
+  for(i = 0; i < NPROC; i++){
+    if(c->pids[i] == pid){
+      c->pids[i] = -1;
+      break;
+    }
+  }
+  return 1;
 }

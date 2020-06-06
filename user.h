@@ -24,6 +24,25 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 
+//new calls
+int print_count(void);
+int toggle(void);
+int add(int, int);
+int ps(void);
+int send(int, int, void *);
+int recv(void *);
+int send_multi(int, int, void *, int);
+int halt(void);
+int create_container(int);
+int destroy_container(int);
+int join_container(int);
+int leave_container(void);
+int scheduler_log_on(void);
+int scheduler_log_off(void);
+int getcid(void);
+
+
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

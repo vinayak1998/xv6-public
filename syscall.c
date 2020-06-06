@@ -7,6 +7,15 @@
 #include "x86.h"
 #include "syscall.h"
 
+//additions
+#define NUM_SYS 37
+int count_sys[NUM_SYS] = {0};
+char* sys_call_name[NUM_SYS] = {"dump", "sys_fork","sys_exit","sys_wait","sys_pipe","sys_read","sys_kill","sys_exec","sys_fstat","sys_chdir","sys_dup","sys_getpid","sys_sbrk","sys_sleep","sys_uptime","sys_open","sys_write","sys_mknod","sys_unlink","sys_link","sys_mkdir","sys_close","sys_print_count", "sys_toggle", "sys_add","sys_ps", "sys_send", "sys_recv", "sys_send_multi", "sys_halt", "sys_create_container", "sys_destroy_container", "sys_join_container", "sys_leave_container", "sys_scheduler_log_on", "sys_scheduler_log_off", "sys_getcid"};
+extern int toggle_val;
+extern int print_values;
+
+
+
 // User code makes a system call with INT T_SYSCALL.
 // System call number in %eax.
 // Arguments on the stack, from the user call to the C
@@ -60,7 +69,7 @@ argptr(int n, char **pp, int size)
 {
   int i;
   struct proc *curproc = myproc();
- 
+
   if(argint(n, &i) < 0)
     return -1;
   if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
@@ -104,6 +113,25 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 
+//new additions
+extern int sys_print_count(void);
+extern int sys_toggle(void);
+extern int sys_add(void);
+extern int sys_ps(void);
+extern int sys_send(void);
+extern int sys_recv(void);
+extern int sys_send_multi(void);
+extern int sys_halt(void);
+extern int sys_create_container(void);
+extern int sys_destroy_container(void);
+extern int sys_join_container(void);
+extern int sys_leave_container(void);
+extern int sys_scheduler_log_on(void);
+extern int sys_scheduler_log_off(void);
+extern int sys_getcid(void);
+
+
+
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
 [SYS_exit]    sys_exit,
@@ -126,6 +154,22 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_print_count]   sys_print_count,
+[SYS_toggle]   sys_toggle,
+[SYS_add]   sys_add,
+[SYS_ps]   sys_ps,
+[SYS_send]   sys_send,
+[SYS_recv]   sys_recv,
+[SYS_send_multi]   sys_send_multi,
+[SYS_halt] sys_halt,
+[SYS_create_container] sys_create_container,
+[SYS_destroy_container] sys_destroy_container,
+[SYS_join_container] sys_join_container,
+[SYS_leave_container] sys_leave_container,
+[SYS_scheduler_log_on] sys_scheduler_log_on,
+[SYS_scheduler_log_off] sys_scheduler_log_off,
+[SYS_getcid] sys_getcid,
+
 };
 
 void
@@ -137,6 +181,26 @@ syscall(void)
   num = curproc->tf->eax;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     curproc->tf->eax = syscalls[num]();
+
+//maintaining the count of each system call
+    if (toggle_val){
+      int temp = count_sys[num];
+      count_sys[num] = temp + 1;
+      count_sys[23] = 0; //setting sys_toggle count to zero
+    }
+//--------------------------------------------------------
+
+//print_count_fun
+    if (print_values){
+      for(int i = 1; i<NUM_SYS; i++){
+        if(count_sys[i] != 0){
+          cprintf("%s %d\n", sys_call_name[i], count_sys[i]);
+        }
+      }
+      print_values = 0; //to print only once
+    }
+//-----------------------------------------------------------
+
   } else {
     cprintf("%d %s: unknown sys call %d\n",
             curproc->pid, curproc->name, num);

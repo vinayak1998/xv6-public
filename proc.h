@@ -49,6 +49,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int cid;                     // Container ID in which the process belongs
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -56,3 +57,18 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+enum container_states {CUNUSED, CUSED};
+
+struct container{
+  int cid;                            // ID of the container
+  int num_procs;                      // Number of processes in the container
+  int pids[NPROC];                    // Process ids of process belonging to the container
+  struct inode *rootdir;              // Current working directory of container
+  enum container_states state;        // State of the container UNUSED/USED
+};
+
+int call_create_container(int cid);      // Create a container, 0 is reserved for the system
+int call_destroy_container(int cid);  // Destroying a container
+int call_join_container(int cid);     // A process joins a container through this command
+int call_leave_container(void);       // A process leaves a container through this command

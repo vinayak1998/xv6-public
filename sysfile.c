@@ -294,18 +294,46 @@ sys_open(void)
   if(argstr(0, &path) < 0 || argint(1, &omode) < 0)
     return -1;
 
+  struct proc *p;
+  p = myproc();
+  int cid = p -> cid;
+  int n = strlen(path);
+  char newpath[n+3];
+  if(cid != -1){
+    for(int i = 0; i < n; i++){
+      newpath[i] = *(path + i);
+    }
+    newpath[n] = '@';
+    newpath[n+1] = '0' + cid;
+    newpath[n+2] = '\0';
+  }
+
   begin_op();
 
   if(omode & O_CREATE){
-    ip = create(path, T_FILE, 0, 0);
+    if(cid != -1){
+      ip = create(newpath, T_FILE, 0, 0);
+    }
+    else{
+      ip = create(path, T_FILE, 0, 0);
+    }
+    // ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
       end_op();
       return -1;
     }
   } else {
     if((ip = namei(path)) == 0){
-      end_op();
-      return -1;
+      if(cid != -1){
+        if((ip = namei(newpath)) == 0){
+          end_op();
+          return -1;
+        }
+      }
+      else{
+        end_op();
+        return -1;
+      }
     }
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
@@ -375,7 +403,7 @@ sys_chdir(void)
   char *path;
   struct inode *ip;
   struct proc *curproc = myproc();
-  
+
   begin_op();
   if(argstr(0, &path) < 0 || (ip = namei(path)) == 0){
     end_op();
